@@ -47,8 +47,15 @@ ipcMain.handle('get-screen-sources', async () => {
       types: ['screen'],
       thumbnailSize: { width: 320, height: 180 }
     });
-    console.log('取得したソース:', sources);
-    return sources;
+    
+    // サムネイルをBase64形式に変換
+    const processedSources = sources.map(source => ({
+      ...source,
+      thumbnail: source.thumbnail.toDataURL()
+    }));
+    
+    console.log('取得したソース:', processedSources);
+    return processedSources;
   } catch (error) {
     console.error('get-screen-sources エラー:', error);
     throw error;

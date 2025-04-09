@@ -44,6 +44,13 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+        #recordedPreview {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
         .status {
             margin: 10px 0;
             padding: 10px;
@@ -116,6 +123,10 @@
                 <h3>録画プレビュー</h3>
                 <video id="preview" autoplay muted></video>
             </div>
+            <div class="video-section">
+                <h3>録画データプレビュー</h3>
+                <video id="recordedPreview"></video>
+            </div>
         </div>
         
         <div id="debug"></div>
@@ -125,6 +136,7 @@
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const preview = document.getElementById('preview');
+        const recordedPreview = document.getElementById('recordedPreview');
         const status = document.getElementById('status');
         const debug = document.getElementById('debug');
         const sourceList = document.getElementById('sourceList');
@@ -166,11 +178,11 @@
                     sourceItem.dataset.id = source.id;
                     
                     const img = document.createElement('img');
-                    img.src = source.thumbnail.toDataURL();
+                    img.src = source.thumbnail;
                     
                     const name = document.createElement('p');
                     name.textContent = source.name;
-                    console.log(source.name, source.thumbnail.toDataURL());
+                    console.log(source.name, source.thumbnail);
                     
                     // デバッグ情報を追加
                     const debugInfo = document.createElement('p');
@@ -260,6 +272,43 @@
                 // ライブストリーミング用にプレビューを設定
                 preview.srcObject = stream;
                 preview.muted = true;
+
+                // プレビューのクリックイベントを追加
+                preview.onclick = () => {
+                    if (currentBlobUrl) {
+                        // クリック時点での録画データをコピー
+                        const recordedBlob = new Blob(recordedChunks, {
+                            type: 'video/webm; codecs=vp9'
+                        });
+                        
+                        // 以前のURLを解放
+                        if (recordedPreview.src) {
+                            URL.revokeObjectURL(recordedPreview.src);
+                        }
+                        
+                        // 新しいURLを作成
+                        const recordedUrl = URL.createObjectURL(recordedBlob);
+                        
+                        // 動画を一時的に無効化
+                        recordedPreview.controls = false;
+                        recordedPreview.currentTime = 0;
+                        recordedPreview.style.pointerEvents = 'none'; // クリックを無効化
+                        
+                        // 以前のイベントハンドラを削除
+                        recordedPreview.onloadedmetadata = null;
+                        recordedPreview.onloadeddata = null;
+                        
+                        // メタデータと動画データが完全に読み込まれた後に有効化
+                        recordedPreview.addEventListener('loadeddata', () => {
+                            recordedPreview.currentTime = 0;
+                            recordedPreview.controls = true;
+                            recordedPreview.style.pointerEvents = 'auto'; // クリックを有効化
+                        }, { once: true });
+                        
+                        // 動画のソースを設定
+                        recordedPreview.src = recordedUrl;
+                    }
+                };
 
                 mediaRecorder.ondataavailable = (e) => {
                     log(`データが利用可能: ${e.data.size} バイト`);
