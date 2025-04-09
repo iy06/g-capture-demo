@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Screen Recorder</title>
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #startBtn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        #stopBtn {
+            background-color: #f44336;
+            color: white;
+        }
+        #preview {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .recording {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        #debug {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .source-list {
+            margin: 20px 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .source-item {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            cursor: pointer;
+            width: 200px;
+        }
+        .source-item.selected {
+            border: 2px solid #4CAF50;
+        }
+        .source-item img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+        .source-item p {
+            margin: 5px 0;
+            text-align: center;
+        }
+        .video-container {
+            margin-top: 20px;
+        }
+        .video-section {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .video-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Screen Recorder</h1>
+        <div class="controls">
+            <button id="startBtn">録画開始</button>
+            <button id="stopBtn" disabled>録画停止</button>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="sourceList" class="source-list"></div>
+        
+        <div class="video-container">
+            <div class="video-section">
+                <h3>録画プレビュー</h3>
+                <video id="preview" autoplay muted></video>
+            </div>
+        </div>
+        
+        <div id="debug"></div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const preview = document.getElementById('preview');
+        const status = document.getElementById('status');
+        const debug = document.getElementById('debug');
+        const sourceList = document.getElementById('sourceList');
+        
+        let mediaRecorder;
+        let recordedChunks = [];
+        let selectedSourceId = null;
+        let recordingStartTime;
+        let recordingTimer;
+        let currentBlob;
+        let currentBlobUrl;
+        let isRecording = false;
+        let currentStream = null;
+
+        function log(message) {
+            console.log(message);
+            debug.textContent += message + '\n';
+        }
+
+        // デバッグ情報を表示
+        log('スクリプトが読み込まれました');
+        log(`window.electronAPI: ${window.electronAPI ? '存在します' : '存在しません'}`);
+
+        // 画面ソースを取得して表示
+        async function loadScreenSources() {
+            try {
+                log('画面ソースを取得中...');
+                const sources = await window.electronAPI.getScreenSources();
+                log(`取得したソース数: ${sources.length}`);
+                
+                // ソースリストをクリア
+                sourceList.innerHTML = '';
+                
+                // 各ソースを表示
+                console.log(sources);
+                sources.forEach(source => {
+                    const sourceItem = document.createElement('div');
+                    sourceItem.className = 'source-item';
+                    sourceItem.dataset.id = source.id;
+                    
+                    const img = document.createElement('img');
+                    img.src = source.thumbnail.toDataURL();
+                    
+                    const name = document.createElement('p');
+                    name.textContent = source.name;
+                    console.log(source.name, source.thumbnail.toDataURL());
+                    
+                    // デバッグ情報を追加
+                    const debugInfo = document.createElement('p');
+                    debugInfo.textContent = `ID: ${source.id}`;
+                    debugInfo.style.fontSize = '10px';
+                    debugInfo.style.color = '#666';
+                    
+                    sourceItem.appendChild(img);
+                    sourceItem.appendChild(name);
+                    sourceItem.appendChild(debugInfo);
+                    
+                    // クリックイベントを追加
+                    sourceItem.addEventListener('click', () => {
+                        // 選択状態を更新
+                        document.querySelectorAll('.source-item').forEach(item => {
+                            item.classList.remove('selected');
+                        });
+                        sourceItem.classList.add('selected');
+                        selectedSourceId = source.id;
+                        log(`ソースを選択: ${source.name} (${source.id})`);
+                    });
+                    
+                    sourceList.appendChild(sourceItem);
+                    
+                    // デバッグ情報をログに出力
+                    log(`ソース情報: ${source.name} (${source.id})`);
+                });
+                
+                // 最初のソースを選択
+                if (sources.length > 0) {
+                    const firstSource = document.querySelector('.source-item');
+                    if (firstSource) {
+                        firstSource.classList.add('selected');
+                        selectedSourceId = firstSource.dataset.id;
+                        log(`最初のソースを選択: ${sources[0].name} (${sources[0].id})`);
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                log(`エラーが発生しました: ${error.message}`);
+                status.textContent = `エラーが発生しました: ${error.message}`;
+            }
+        }
+
+        // ページ読み込み時に画面ソースを取得
+        loadScreenSources();
+
+        startBtn.onclick = async () => {
+            try {
+                log('録画開始ボタンがクリックされました');
+                
+                if (!selectedSourceId) {
+                    throw new Error('画面ソースが選択されていません');
+                }
+                
+                log('メディアストリームを取得中...');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        mandatory: {
+                            chromeMediaSource: 'desktop',
+                            chromeMediaSourceId: selectedSourceId
+                        }
+                    }
+                });
+                
+                // ストリームを保存
+                currentStream = stream;
+                
+                log('MediaRecorderを設定中...');
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'video/webm; codecs=vp9'
+                });
+
+                // 録画開始時間を記録
+                recordingStartTime = new Date();
+                isRecording = true;
+                
+                // 録画済みチャンクをクリア
+                recordedChunks = [];
+                
+                // 以前のBlobURLを解放
+                if (currentBlobUrl) {
+                    URL.revokeObjectURL(currentBlobUrl);
+                    currentBlobUrl = null;
+                }
+
+                // ライブストリーミング用にプレビューを設定
+                preview.srcObject = stream;
+                preview.muted = true;
+
+                mediaRecorder.ondataavailable = (e) => {
+                    log(`データが利用可能: ${e.data.size} バイト`);
+                    if (e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                        
+                        // 録画済み部分を再生用に更新
+                        currentBlob = new Blob(recordedChunks, {
+                            type: 'video/webm; codecs=vp9'
+                        });
+                        
+                        // 以前のURLを解放
+                        if (currentBlobUrl) {
+                            URL.revokeObjectURL(currentBlobUrl);
+                        }
+                        
+                        // 新しいURLを作成
+                        currentBlobUrl = URL.createObjectURL(currentBlob);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    log('録画が停止されました');
+                    isRecording = false;
+                    
+                    // 最終的な録画データを保存
+                    const blob = new Blob(recordedChunks, {
+                        type: 'video/webm; codecs=vp9'
+                    });
+                    log(`録画データサイズ: ${blob.size} バイト`);
+                    
+                    // ダウンロードリンクを作成
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `screen-recording-${new Date().toISOString()}.webm`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                log('録画を開始します...');
+                // ライブストリーミング用に設定（データを頻繁に取得）
+                mediaRecorder.start(100);
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = '録画中...';
+                status.classList.add('recording');
+            } catch (error) {
+                console.error('Error:', error);
+                log(`エラーが発生しました: ${error.message}`);
+                status.textContent = `エラーが発生しました: ${error.message}`;
+            }
+        };
+
+        stopBtn.onclick = () => {
+            log('録画停止ボタンがクリックされました');
+            mediaRecorder.stop();
+            if (preview.srcObject) {
+                preview.srcObject.getTracks().forEach(track => track.stop());
+            }
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = '録画が完了しました';
+            status.classList.remove('recording');
+        };
+    </script>
+</body>
+</html> 
